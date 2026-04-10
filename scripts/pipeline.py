@@ -16,7 +16,7 @@ from PIL import Image
 API_KEY = os.environ.get("API_KEY", "password")
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://127.0.0.1:8045/v1")
 MAX_RETRIES = 3
-TOPIC_LIMIT = int(os.environ.get("TOPIC_LIMIT", "3"))
+TOPIC_LIMIT = int(os.environ.get("TOPIC_LIMIT", "30"))
 
 # Percentage (0.0 - 1.0) chance that a given story uses artistic mode vs photographic mode
 ART_PERCENTAGE = float(os.environ.get("ART_PERCENTAGE", "0.33"))
@@ -334,9 +334,8 @@ def fetch_top_news(limit=30):
                 else:
                     all_headlines.append(f"({geo}) {title}: " + " / ".join(clean_snippets))
             print(f"[{timestamp}] ✅ Got {len(items)} items from {geo} Trends RSS.")
-            continue
         except Exception as e:
-            print(f"[{timestamp}] ⚠️ {geo} Trends RSS failed ({e}). Trying fallback...")
+            print(f"[{timestamp}] ⚠️ {geo} Trends RSS failed ({e}).")
 
         news_url = f"https://news.google.com/rss/search?q=trending+news+{geo}&hl=en-US&gl={geo}&ceid={geo}:en"
         try:
@@ -344,7 +343,7 @@ def fetch_top_news(limit=30):
             response = urllib.request.urlopen(req, timeout=10)
             xml_data = response.read().decode('utf-8')
             items = re.findall(r'<item>(.*?)</item>', xml_data, re.DOTALL)
-            for item in items[:15]:
+            for item in items[:30]:
                 title = re.search(r'<title>(.*?)</title>', item).group(1).replace('&amp;', '&')
                 pic_url = ""
                 desc_match = re.search(r'<description>(.*?)</description>', item)
@@ -357,7 +356,7 @@ def fetch_top_news(limit=30):
                     all_headlines.append(f"({geo}) {title} [Picture: {pic_url}]")
                 else:
                     all_headlines.append(f"({geo}) {title}")
-            print(f"[{timestamp}] ✅ Got {len(items[:15])} fallback items for {geo}.")
+            print(f"[{timestamp}] ✅ Got {len(items[:30])} news items for {geo}.")
         except Exception as e:
             print(f"[{timestamp}] ❌ Failed to fetch news for {geo}: {e}")
 
@@ -707,7 +706,7 @@ def main():
     base_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'news'))
     os.makedirs(base_dir, exist_ok=True)
 
-    # Use TOPIC_LIMIT from env (default 10) to have enough candidates after filtering
+    # Use TOPIC_LIMIT from env (default 30) to have enough candidates after filtering
     raw_news = fetch_top_news(limit=TOPIC_LIMIT)
     news_items = filter_topics_with_ai(raw_news, existing_titles)
 
