@@ -805,6 +805,66 @@ Details: {item['description']}"""
         if not os.path.exists(ref_dir):
             os.makedirs(ref_dir)
 
+        # --- Generate 8-second Intro Script & Audio ---
+        intro_prompt = f"""Write an 8-second video intro script for the news story titled: '{title}'.
+It must follow this exact format:
+> 00:00-00:05 [Video Prompt] Starting from the cover image, immediately transition into a dynamic hook that grabs attention fast.
+[Voice: onyx] (A very short, punchy 5-second hook about the story)
+
+> 00:05-00:08 [Video Prompt] Quick intro/logo transition.
+[Voice: alloy] (Very brief 3-second wrap up of the intro)
+
+Story details: {item['description']}"""
+
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ✍️ Generating 8-second intro script...")
+        intro_script_content = generate_text(intro_prompt)
+        
+        with open(os.path.join(project_dir, "intro_script.md"), "w", encoding='utf-8') as f:
+            f.write(intro_script_content)
+
+        intro_blocks = re.findall(r'\[Voice:\s*(\w+)\]\s*(.*?)(?=\n>|\Z)', intro_script_content, re.DOTALL | re.IGNORECASE)
+        intro_voice_file = os.path.join(project_dir, "intro_audio.mp3")
+        
+        if not intro_blocks:
+            clean_intro = re.sub(r'\[.*?\]', '', intro_script_content)
+            clean_intro = re.sub(r'>.*?$', '', clean_intro, flags=re.MULTILINE).strip()
+            generate_audio(clean_intro, intro_voice_file, voice='onyx')
+        else:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🎙️ Generating intro audio chunks...")
+            intro_chunk_files = []
+            for i, (voice_name, text) in enumerate(intro_blocks):
+                chunk_text = text.strip().replace('**', '').replace('*', '')
+                if not chunk_text: continue
+                
+                voice_name = voice_name.lower()
+                if voice_name not in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']:
+                    voice_name = 'onyx'
+                    
+                chunk_file = os.path.join(ref_dir, f"intro_chunk_{i:03d}.mp3")
+                if generate_audio(chunk_text[:500], chunk_file, voice=voice_name):
+                    intro_chunk_files.append(chunk_file)
+            
+            if intro_chunk_files:
+                intro_concat_list = os.path.join(ref_dir, "intro_concat.txt")
+                with open(intro_concat_list, "w", encoding='utf-8') as cf:
+                    for cf_file in intro_chunk_files:
+                        cf.write(f"file '{os.path.basename(cf_file)}'\n")
+                
+                cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", intro_concat_list, "-c", "copy", intro_voice_file]
+                try:
+                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    import shutil
+                    shutil.copy(intro_chunk_files[0], intro_voice_file)
+                
+                for cf_file in intro_chunk_files:
+                    try: os.remove(cf_file)
+                    except: pass
+                if os.path.exists(intro_concat_list):
+                    os.remove(intro_concat_list)
+        # --- End Intro Generation ---
+
+
         print(f"[{datetime.now().strftime('%H:%M:%S')}] 🎥 Searching for reference video/photos...")
         try:
             import yt_dlp

@@ -1,5 +1,7 @@
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 */3 * * *'
 
 jobs:
   run-pipeline:
@@ -20,7 +22,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install dependencies
         run: |
@@ -29,7 +31,7 @@ jobs:
           .venv/bin/python -m pip install -r requirements.txt
 
       - name: Restore Antigravity Data Session
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: ~/.antigravity_tools
           key: antigravity-data-${{ runner.os }}-${{ github.run_id }}
@@ -40,7 +42,7 @@ jobs:
         run: mkdir -p ~/.browser-session
 
       - name: Restore browser session
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: ~/.browser-session
           key: v-browser-session-${{ runner.os }}-${{ github.run_id }}
@@ -68,7 +70,7 @@ jobs:
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
       - name: Cache Antigravity Docker Image
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-antigravity
         with:
           path: /tmp/antigravity-image.tar
@@ -146,14 +148,14 @@ jobs:
 
       - name: Save Antigravity Data Session
         if: always()
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: ~/.antigravity_tools
           key: antigravity-data-${{ runner.os }}-${{ github.run_id }}
 
       - name: Save browser session
         if: always()
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: ~/.browser-session
           key: v-browser-session-${{ runner.os }}-${{ github.run_id }}
