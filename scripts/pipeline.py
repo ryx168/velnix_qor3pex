@@ -5,7 +5,7 @@ import urllib.request
 import json
 import time
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import re
 import base64
 import io
@@ -97,8 +97,137 @@ def get_drive_service():
 
     return build('drive', 'v3', credentials=creds)
 
-def sync_opinions_from_drive():
-    service = get_drive_service()
+def get_pacific_time():
+    """Returns the current time in Pacific Time (PT)."""
+    # Offset is -7 hours during PDT (current metadata shows -07:00)
+    return datetime.now(timezone(timedelta(hours=-7)))
+
+def get_todays_processed_titles(service):
+    """Browses Drive to find folders created today in PT and returns their titles."""
+    pt_now = get_pacific_time()
+    year = pt_now.strftime("%Y")
+    month = pt_now.strftime("%m")
+    date = pt_now.strftime("%Y-%m-%d")
+    
+    root_id = '1tnTb4BjVjOARRKaQjmrse4kddddj9ogj'
+    print(f"🔍 Checking Drive history for PT date: {date}")
+    
+    def find_folder(parent_id, name):
+        try:
+            query = f"name = '{name}' and mimeType = 'application/vnd.google-apps.folder' and '{parent_id}' in parents and trashed = false"
+            results = service.files().list(q=query, fields='files(id, name)').execute()
+            files = results.get('files', [])
+            return files[0]['id'] if files else None
+        except Exception as e:
+            print(f"   ⚠️ Error finding folder '{name}': {e}")
+            return None
+
+    # Navigate: Root -> Year -> Month -> Date
+    year_id = find_folder(root_id, year)
+    if not year_id: return []
+    month_id = find_folder(year_id, month)
+    if not month_id: return []
+    date_id = find_folder(month_id, date)
+    if not date_id:
+        print(f"   ℹ️ No folder for date {date} found yet. Assuming fresh start.")
+        return []
+
+    # List all topics (folders) inside the date folder
+    try:
+        results = service.files().list(
+            q=f"'{date_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            fields='files(name)'
+        ).execute()
+        folders = results.get('files', [])
+        
+        titles = []
+        for f in folders:
+            name = f['name']
+            # Pattern: News-HHMM-idx-Title
+            match = re.search(r'News-\d{4}-\d{2}-(.+)', name)
+            if match:
+                titles.append(match.group(1).replace('-', ' '))
+            else:
+                titles.append(name)
+        
+        if titles:
+            print(f"   📈 Found {len(titles)} existing topics today: {', '.join(titles[:3])}...")
+        return titles
+    except Exception as e:
+        print(f"   ⚠️ Error listing topics: {e}")
+        return []
+
+def filter_topics_with_ai(new_topics, existing_titles):
+    """Uses LLM to aggressively deduplicate and enforce category limits (max 3 per category)."""
+    if not new_topics: return []
+    
+    print(f"🧠 Filtering {len(new_topics)} candidates against {len(existing_titles)} existing items today...")
+    
+    final_topics = []
+    category_counts = {} # e.g., {"Sports": 1, "Technology": 2}
+    
+    # Build text representation of existing work for prompt context
+    processed_context = "\n".join([f"- {t}" for t in existing_titles]) if existing_titles else "No topics processed yet today."
+
+    for topic in new_topics:
+        title = topic['title']
+        desc = topic['description']
+        
+        prompt = f"""You are a content curator. I have a list of topics already processed today and a NEW candidate news topic.
+        
+        EXISTING TOPICS PROCESSED TODAY:
+        {processed_context}
+        
+        NEW CANDIDATE TOPIC:
+        Title: {title}
+        Description: {desc}
+        
+        YOUR TASK:
+        1. Categorize this NEW topic (e.g., Sports, Technology, Politics, Entertainment, Science, etc.).
+        2. Determine if this NEW topic is "similar or redundant" compared to the EXISTING topics. 
+           Be AGGRESSIVE: If it covers the same event, person, or immediate sub-topic, mark it as similar.
+        
+        Return your response strictly as JSON:
+        {{
+            "category": "Category Name",
+            "is_similar": true,
+            "reason": "Brief explanation"
+        }}"""
+        
+        try:
+            response = generate_text(prompt).strip()
+            if '```' in response:
+                response = re.search(r'```(?:json)?\s*(.*?)\s*```', response, re.DOTALL).group(1)
+            
+            res_json = json.loads(response)
+            category = res_json.get('category', 'General')
+            is_similar = res_json.get('is_similar', False)
+            
+            if is_similar:
+                print(f"   ⏩ Skipping '{title}': Similar to existing ({res_json.get('reason')})")
+                continue
+            
+            # Enforce category limits (max 3)
+            current_count = category_counts.get(category, 0)
+            if current_count >= 3:
+                print(f"   ⏩ Skipping '{title}': Category '{category}' limit reached (3)")
+                continue
+            
+            # Topic approved!
+            category_counts[category] = current_count + 1
+            final_topics.append(topic)
+            print(f"   ✅ Approved '{title}' -> Category: {category} (Current {category}: {category_counts[category]})")
+            
+            # Add to context for subsequent checks in this same run
+            processed_context += f"\n- {title}"
+            
+        except Exception as e:
+            print(f"   ⚠️ AI check failed for '{title}': {e}. Including as fallback.")
+            final_topics.append(topic)
+            
+    return final_topics
+
+def sync_opinions_from_drive(service):
     if not service:
         return ""
 
@@ -139,6 +268,7 @@ def sync_opinions_from_drive():
     except Exception as e:
         print(f"Failed to sync opinions from drive: {e}")
         return ""
+
 
 
 def fetch_top_news(limit=10):
@@ -498,17 +628,31 @@ def clean_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
 
 def main():
-    now = datetime.now()
+    service = get_drive_service()
+    user_opinions = ""
+    existing_titles = []
+    
+    if service:
+        user_opinions = sync_opinions_from_drive(service)
+        existing_titles = get_todays_processed_titles(service)
+    else:
+        print("⚠️ No Drive service available. Skipping history check and opinions sync.")
+
+    now = get_pacific_time()
     year_str = now.strftime("%Y")
     month_str = now.strftime("%m")
     date_str = now.strftime("%Y-%m-%d")
 
-    user_opinions = sync_opinions_from_drive()
-
     base_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'news'))
     os.makedirs(base_dir, exist_ok=True)
 
-    news_items = fetch_top_news(limit=3)
+    # Increase fetch limit to have enough candidates after filtering
+    raw_news = fetch_top_news(limit=10)
+    news_items = filter_topics_with_ai(raw_news, existing_titles)
+
+    if not news_items:
+        print("📭 No new topics to process after filtering and limits.")
+        return
 
     for idx, item in enumerate(news_items):
         title = item['title']
