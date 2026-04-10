@@ -16,6 +16,7 @@ from PIL import Image
 API_KEY = os.environ.get("API_KEY", "password")
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://127.0.0.1:8045/v1")
 MAX_RETRIES = 3
+TOPIC_LIMIT = int(os.environ.get("TOPIC_LIMIT", "3"))
 
 def get_drive_service():
     try:
@@ -646,8 +647,8 @@ def main():
     base_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'news'))
     os.makedirs(base_dir, exist_ok=True)
 
-    # Increase fetch limit to have enough candidates after filtering
-    raw_news = fetch_top_news(limit=10)
+    # Use TOPIC_LIMIT from env (default 10) to have enough candidates after filtering
+    raw_news = fetch_top_news(limit=TOPIC_LIMIT)
     news_items = filter_topics_with_ai(raw_news, existing_titles)
 
     if not news_items:
