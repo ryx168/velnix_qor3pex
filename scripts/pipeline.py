@@ -727,7 +727,7 @@ def main():
         if not os.path.exists(year_month_dir):
             os.makedirs(year_month_dir)
 
-        folder_name = f"News-{start_hhmm}-{idx+1:02d}-{clean_title}"
+        folder_name = f"{start_hhmm}-{clean_title}"
         project_dir = os.path.join(year_month_dir, folder_name)
 
         if not os.path.exists(project_dir):
