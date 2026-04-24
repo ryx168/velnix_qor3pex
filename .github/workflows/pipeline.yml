@@ -95,6 +95,7 @@ jobs:
       # -------------------------------------------------------
 
       - name: Cache Antigravity Docker Image
+        if: github.event.inputs.report_only != 'true'
         uses: actions/cache@v4.2.0
         id: cache-antigravity
         with:
@@ -102,16 +103,17 @@ jobs:
           key: antigravity-docker-v1
 
       - name: Download & Save Docker Image
-        if: steps.cache-antigravity.outputs.cache-hit != 'true'
+        if: steps.cache-antigravity.outputs.cache-hit != 'true' && github.event.inputs.report_only != 'true'
         run: |
           docker pull lbjlaq/antigravity-manager:latest
           docker save lbjlaq/antigravity-manager:latest -o /tmp/antigravity-image.tar
 
       - name: Load Cached Docker Image
-        if: steps.cache-antigravity.outputs.cache-hit == 'true'
+        if: steps.cache-antigravity.outputs.cache-hit == 'true' && github.event.inputs.report_only != 'true'
         run: docker load -i /tmp/antigravity-image.tar
 
       - name: Start Antigravity Manager via Docker
+        if: github.event.inputs.report_only != 'true'
         run: |
           docker run -d --name antigravity-manager \
             --restart always \
@@ -123,6 +125,7 @@ jobs:
             lbjlaq/antigravity-manager:latest
 
       - name: Wait for Antigravity Manager to initialize
+        if: github.event.inputs.report_only != 'true'
         run: |
           sleep 10
           curl -f http://127.0.0.1:8045/v1/models || echo "API still starting, proceeding..."
@@ -133,6 +136,7 @@ jobs:
       # -------------------------------------------------------
 
       - name: Verify GitHub Models API
+        if: github.event.inputs.report_only != 'true'
         run: |
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.GH_MODELS_TOKEN }}" \
@@ -150,6 +154,7 @@ jobs:
       # -------------------------------------------------------
 
       - name: Check Cloudflare AI accounts
+        if: github.event.inputs.report_only != 'true'
         run: |
           .venv/bin/python scripts/check_cf_accounts.py --best > /tmp/cf_best.txt 2>&1 || true
           CF_BEST=$(cat /tmp/cf_best.txt | tail -1 | tr -d '[:space:]')
@@ -168,12 +173,14 @@ jobs:
       # -------------------------------------------------------
 
       - name: Free up disk space for Ollama
+        if: github.event.inputs.report_only != 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           docker image prune -f || true
           df -h
 
       - name: Install and Start Ollama
+        if: github.event.inputs.report_only != 'true'
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           mkdir -p logs
@@ -182,6 +189,7 @@ jobs:
           echo "✅ Ollama server started"
 
       - name: Cache Ollama model
+        if: github.event.inputs.report_only != 'true'
         uses: actions/cache@v4.2.0
         id: cache-ollama-model
         with:
@@ -189,13 +197,14 @@ jobs:
           key: ollama-llama3.2-3b-v1
 
       - name: Pull Ollama model (if not cached)
-        if: steps.cache-ollama-model.outputs.cache-hit != 'true'
+        if: steps.cache-ollama-model.outputs.cache-hit != 'true' && github.event.inputs.report_only != 'true'
         run: |
           echo "Pulling llama3.2:3b..."
           ollama pull llama3.2:3b
           echo "✅ Model pulled"
 
       - name: Verify Ollama ready
+        if: github.event.inputs.report_only != 'true'
         run: |
           ollama list
           echo "OLLAMA_AVAILABLE=true" >> $GITHUB_ENV
@@ -266,6 +275,7 @@ jobs:
           sleep 12
 
           .venv/bin/python scripts/pipeline.py
+          .venv/bin/python scripts/add_google_calendar_event.py
 
       # -------------------------------------------------------
       # SAVE STATE
