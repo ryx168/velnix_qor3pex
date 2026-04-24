@@ -371,6 +371,7 @@ def main():
     md_filename = f"daily_summary_{date_str}.md"
     md_path = os.path.join(base_dir, md_filename)
     try:
+        os.makedirs(base_dir, exist_ok=True)
         with open(md_path, 'w', encoding='utf-8') as f:
             f.write(content)
         print(f"Generated local Markdown report at {md_path}")
